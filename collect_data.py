@@ -281,6 +281,15 @@ class World(object):
         actor_type = get_actor_display_name(self.player)
         self.hud.notification(actor_type)
 
+        # 신호등 주기 바꾸기
+        # 적색 신호는 시간을 바꿔도 다른 신호등이 청신호면 적색 신호가 유지됨
+        # 따라서 적색 신호를 짧게 바꾸고 싶으면 다른 색 주기도 함께 변경 필요
+        traffic_lights = self.world.get_actors().filter('traffic.traffic_light')
+        for light in traffic_lights:
+            light.set_red_time(3)
+            light.set_green_time(7)
+            light.set_yellow_time(1)
+
         if self.sync:
             self.world.tick()
         else:
@@ -326,10 +335,10 @@ class World(object):
 
     def tick(self, clock):
         # 적색 신호에 걸렸을 때 바로 청신호로 바꿔주기
-        if self.player.is_at_traffic_light():
-            traffic_light = self.player.get_traffic_light()
-            if traffic_light.get_state() == carla.TrafficLightState.Red:
-                traffic_light.set_state(carla.TrafficLightState.Green)
+        # if self.player.is_at_traffic_light():
+        #     traffic_light = self.player.get_traffic_light()
+        #     if traffic_light.get_state() == carla.TrafficLightState.Red:
+        #         traffic_light.set_state(carla.TrafficLightState.Green)
         self.hud.tick(self, clock)
 
     def render(self, display):
