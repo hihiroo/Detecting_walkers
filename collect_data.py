@@ -1,3 +1,4 @@
+# -- coding: utf-8 --
 #!/usr/bin/env python
 
 # Copyright (c) 2019 Computer Vision Center (CVC) at the Universitat Autonoma de
@@ -324,6 +325,11 @@ class World(object):
             pass
 
     def tick(self, clock):
+        # 적색 신호에 걸렸을 때 바로 청신호로 바꿔주기
+        if self.player.is_at_traffic_light():
+            traffic_light = self.player.get_traffic_light()
+            if traffic_light.get_state() == carla.TrafficLightState.Red:
+                traffic_light.set_state(carla.TrafficLightState.Green)
         self.hud.tick(self, clock)
 
     def render(self, display):
