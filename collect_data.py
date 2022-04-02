@@ -191,6 +191,8 @@ class World(object):
         self.number_of_vehicles = 20
         self.walkers_id = []
         self.vehicles_id = []
+        self.save_dir = args.save_dir
+        self.save_img = args.save_img
         try:
             self.map = self.world.get_map()
         except RuntimeError as error:
@@ -283,6 +285,8 @@ class World(object):
         self.camera_manager = CameraManager(self.player, self.hud, self._gamma)
         self.camera_manager.transform_index = cam_pos_index
         self.camera_manager.set_sensor(cam_index, notify=False)
+        self.camera_manager.save_img = self.save_img
+        self.camera_manager.save_dir = self.save_dir
         actor_type = get_actor_display_name(self.player)
         self.hud.notification(actor_type)
 
@@ -488,7 +492,8 @@ class World(object):
             self.collision_sensor.sensor,
             self.lane_invasion_sensor.sensor,
             self.gnss_sensor.sensor,
-            self.imu_sensor.sensor]
+            self.imu_sensor.sensor,
+            self.camera_manager.semantic_cam]
         for sensor in sensors:
             if sensor is not None:
                 sensor.stop()
@@ -1173,6 +1178,10 @@ class CameraManager(object):
         self._parent = parent_actor
         self.hud = hud
         self.recording = False
+        self.save_img = None
+        self.save_dir = None
+        self.semantic_cam = None
+        self.walkers = None
         bound_x = 0.5 + self._parent.bounding_box.extent.x
         bound_y = 0.5 + self._parent.bounding_box.extent.y
         bound_z = 0.5 + self._parent.bounding_box.extent.z
@@ -1255,6 +1264,7 @@ class CameraManager(object):
             # circular reference.
             weak_self = weakref.ref(self)
             self.sensor.listen(lambda image: CameraManager._parse_image(weak_self, image))
+        
         if notify:
             self.hud.notification(self.sensors[index][2])
         self.index = index
@@ -1314,6 +1324,56 @@ class CameraManager(object):
         if self.recording:
             image.save_to_disk('_out/%08d' % image.frame)
 
+        if self.save_img:
+            save_dir = self.save_dir + 'image_recording/'
+            if not os.path.isdir(save_dir):
+                os.makedirs(save_dir)
+            if not os.path.isdir(save_dir + 'info/'):
+                os.makedirs(save_dir + 'info/')
+            if not os.path.isdir(save_dir + 'semantic/'):
+                os.makedirs(save_dir + 'semantic/')
+            
+            if self.semantic_cam is None:
+                self.semantic_cam = self._parent.get_world().spawn_actor(
+                    self.sensors[5][-1],
+                    self._camera_transforms[1][0],
+                    attach_to=self._parent,
+                    attachment_type=self._camera_transforms[1][1])
+                cc = carla.ColorConverter.CityScapesPalette
+                self.semantic_cam.listen(lambda image: image.save_to_disk(save_dir + 'semantic/%08d' % image.frame,cc))
+
+            if self.walkers is None or len(self.walkers) == 0:
+                self.walkers = self._parent.get_world().get_actors().filter('walker.*')
+            
+            with open(save_dir + 'info/%08d' % image.frame + '.txt', 'w') as car_info:
+                car_info.write("Car_velocity_xyz ")
+                car_info.write(str(self._parent.get_velocity().x) + " " + str(self._parent.get_velocity().y) + " " + str(self._parent.get_velocity().z) + '\n')
+                
+                car_info.write("Camera_hw_fov ")
+                cam_h = self.sensor.attributes['image_size_y']
+                cam_w = self.sensor.attributes['image_size_x']
+                cam_fov = self.sensor.attributes['fov']
+                car_info.write(str(cam_h) + " " + str(cam_w) + " " + str(cam_fov) + "\n")
+
+                car_info.write("Camera_location_xyz_yaw_roll_pitch ")
+                cam_loc = self.sensor.get_transform().location
+                cam_rot = self.sensor.get_transform().rotation
+                car_info.write(str(cam_loc.x) + " " + str(cam_loc.y) + " " + str(cam_loc.z) + " " + str(cam_rot.yaw) + " " + str(cam_rot.roll) + " " + str(cam_rot.pitch) + '\n')
+                
+                for walker in self.walkers:
+                    extent_x = walker.bounding_box.extent.x
+                    extent_y = walker.bounding_box.extent.y
+                    extent_z = walker.bounding_box.extent.z
+                    bb_loc = walker.bounding_box.location
+                    loc = walker.get_transform().location
+                    rot = walker.get_transform().rotation
+
+                    car_info.write("Walker_id_bounding_box_extent_xyz_location_xyz_location_xyz_rotation_yaw_roll_pitch ")
+                    car_info.write(str(walker.id) + " " + str(extent_x) + " " + str(extent_y) + " " + str(extent_z) + " " +\
+                        str(bb_loc.x) + " " + str(bb_loc.y) + " " + str(bb_loc.z) + " " + \
+                        str(loc.x) + " " + str(loc.y) + " " + str(loc.z) + " " + \
+                            str(rot.yaw) + " " + str(rot.roll) + " " + str(rot.pitch) + "\n")
+            image.save_to_disk(save_dir + '%08d' % image.frame, carla.ColorConverter.Raw)
 
 # ==============================================================================
 # -- game_loop() ---------------------------------------------------------------
@@ -1455,6 +1515,15 @@ def main():
         '--map',
         default='Town02'
     )
+    argparser.add_argument(
+        '--save_img',
+        action='store_true'
+    )
+    argparser.add_argument(
+        '--save_dir',
+        default='/home/adriv/Carla/CARLA_0.9.13/PythonAPI/custom/'
+    )
+
 
     args = argparser.parse_args()
 
