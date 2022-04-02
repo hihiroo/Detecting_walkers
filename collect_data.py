@@ -140,11 +140,12 @@ except ImportError:
 # ==============================================================================
 
 
-def find_weather_presets():
+def find_weather_presets(weather):
     rgx = re.compile('.+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)')
     name = lambda x: ' '.join(m.group(0) for m in rgx.finditer(x))
     presets = [x for x in dir(carla.WeatherParameters) if re.match('[A-Z].+', x)]
-    return [(getattr(carla.WeatherParameters, x), name(x)) for x in presets]
+    start_index = presets.index(weather)
+    return ([(getattr(carla.WeatherParameters, x), name(x)) for x in presets], start_index)
 
 
 def get_actor_display_name(actor, truncate=250):
@@ -188,12 +189,19 @@ class World(object):
         self.sync = args.sync
         self.actor_role_name = args.rolename
         self.walkers_cnt = args.walkers
-        self.number_of_vehicles = 20
+        self.number_of_vehicles = args.vehicles
         self.walkers_id = []
         self.vehicles_id = []
         self.save_dir = args.save_dir
         self.save_img = args.save_img
         self.nodisplay = args.nodisplay
+        self.traffic_time = {
+            'red': args.red_time,
+            'green': args.green_time,
+            'yellow': args.yellow_time
+        }
+        self.crossing_walker = args.walker_crossing_rate
+        self.running_walker = args.walker_running_rate
         try:
             self.map = self.world.get_map()
         except RuntimeError as error:
@@ -209,8 +217,7 @@ class World(object):
         self.imu_sensor = None
         self.radar_sensor = None
         self.camera_manager = None
-        self._weather_presets = find_weather_presets()
-        self._weather_index = 0
+        self._weather_presets, self._weather_index = find_weather_presets(args.weather)
         self._actor_filter = args.filter
         self._actor_generation = args.generation
         self._gamma = args.gamma
@@ -290,15 +297,16 @@ class World(object):
         self.camera_manager.save_dir = self.save_dir
         actor_type = get_actor_display_name(self.player)
         self.hud.notification(actor_type)
+        self.player.get_world().set_weather(self._weather_presets[self._weather_index][0])
 
         # 신호등 주기 바꾸기
         # 적색 신호는 시간을 바꿔도 다른 신호등이 청신호면 적색 신호가 유지됨
         # 따라서 적색 신호를 짧게 바꾸고 싶으면 다른 색 주기도 함께 변경 필요
         traffic_lights = self.world.get_actors().filter('traffic.traffic_light')
         for light in traffic_lights:
-            light.set_red_time(3)
-            light.set_green_time(7)
-            light.set_yellow_time(1)
+            light.set_red_time(self.traffic_time['red'])
+            light.set_green_time(self.traffic_time['green'])
+            light.set_yellow_time(self.traffic_time['yellow'])
 
 
         synchronous_master = False
@@ -353,8 +361,8 @@ class World(object):
         # Spawn Walkers
         # -------------
         # some settings
-        percentagePedestriansRunning = 0.0      # how many pedestrians will run
-        percentagePedestriansCrossing = 0.0     # how many pedestrians will walk through the road
+        percentagePedestriansRunning = self.running_walker      # how many pedestrians will run
+        percentagePedestriansCrossing = self.crossing_walker     # how many pedestrians will walk through the road
         # 1. take all the random locations to spawn
         spawn_points = []
         for i in range(self.walkers_cnt):
@@ -428,8 +436,6 @@ class World(object):
 
         print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(self.vehicles_id), len(self.walkers_id)))
         
-
-
     def next_weather(self, reverse=False):
         self._weather_index += -1 if reverse else 1
         self._weather_index %= len(self._weather_presets)
@@ -1534,7 +1540,49 @@ def main():
         '--nodisplay',
         action='store_true'
     )
-
+    argparser.add_argument(
+        '--vehicles',
+        type=int,
+        default=20
+    )
+    argparser.add_argument(
+        '--red_time',
+        type=int,
+        default=3,
+        help='seconds'
+    )
+    argparser.add_argument(
+        '--green_time',
+        type=int,
+        default=7,
+        help='seconds'
+    )
+    argparser.add_argument(
+        '--yellow_time',
+        type=int,
+        default=1,
+        help='seconds'
+    )
+    argparser.add_argument(
+        '-running', '--walker_running_rate',
+        type=float,
+        default=0.1,
+        help='0.0 ~ 1.0'
+    )
+    argparser.add_argument(
+        '-crossing', '--walker_crossing_rate',
+        type=float,
+        default=0.2,
+        help='0.0 ~ 1.0'
+    )
+    argparser.add_argument(
+        '--weather',
+        default='ClearNoon',
+        help="ClearNight, ClearNoon, ClearSunset, CloudyNight, CloudyNoon, \
+            CloudySunset, Default, HardRainNight, HardRainNoon, HardRainSunset, \
+            MidRainSunset, MidRainyNight, MidRainyNoon, 'SoftRainNight', 'SoftRainNoon', \
+            'SoftRainSunset', 'WetCloudyNight', 'WetCloudyNoon', 'WetCloudySunset', 'WetNight', 'WetNoon', 'WetSunset']"
+    )
 
     args = argparser.parse_args()
 
@@ -1548,7 +1596,6 @@ def main():
     print(__doc__)
 
     try:
-
         game_loop(args)
 
     except KeyboardInterrupt:
@@ -1556,5 +1603,4 @@ def main():
 
 
 if __name__ == '__main__':
-
     main()
