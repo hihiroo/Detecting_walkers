@@ -374,8 +374,12 @@ class World(object):
         # 2. we spawn the walker object
         batch = []
         walker_speed = []
-        for spawn_point in spawn_points:
-            walker_bp = random.choice(blueprintsWalkers)
+        for i, spawn_point in enumerate(spawn_points):
+            if self.walkers_cnt <= 48:
+                walker_bp = blueprintsWalkers[i]
+            else:
+                walker_bp = random.choice(blueprintsWalkers)
+            
             # set as not invincible
             if walker_bp.has_attribute('is_invincible'):
                 walker_bp.set_attribute('is_invincible', 'false')
@@ -1523,7 +1527,8 @@ def main():
     argparser.add_argument(
         '--walkers',
         type=int,
-        default=70)
+        default=48,
+        help='if the number of walkers is smaller than 49, all walkers are different')
     argparser.add_argument(
         '--map',
         default='Town02'
@@ -1572,7 +1577,7 @@ def main():
     argparser.add_argument(
         '-crossing', '--walker_crossing_rate',
         type=float,
-        default=0.2,
+        default=0.1,
         help='0.0 ~ 1.0'
     )
     argparser.add_argument(
