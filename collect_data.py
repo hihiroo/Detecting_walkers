@@ -238,7 +238,7 @@ class World(object):
         self.player_max_speed_fast = 3.713
         # Keep same camera config if the camera manager exists.
         cam_index = self.camera_manager.index if self.camera_manager is not None else 0
-        cam_pos_index = self.camera_manager.transform_index if self.camera_manager is not None else 0
+        cam_pos_index = self.camera_manager.transform_index if self.camera_manager is not None else 1 # 카메라 초기 위치 변경
         # Get a random blueprint.
         blueprint = random.choice(get_actor_blueprints(self.world, self._actor_filter, self._actor_generation))
         blueprint.set_attribute('role_name', self.actor_role_name)
@@ -295,12 +295,8 @@ class World(object):
             light.set_green_time(7)
             light.set_yellow_time(1)
 
-        traffic_manager = self.client.get_trafficmanager(8000)
-        traffic_manager.set_global_distance_to_leading_vehicle(2.0)
-        synchronous_master = False
-        if self.sync:
-            traffic_manager.set_synchronous_mode(True)
 
+        synchronous_master = False
         blueprints = self.world.get_blueprint_library().filter('vehicle.*')
         blueprintsWalkers = self.world.get_blueprint_library().filter('walker.pedestrian.*')
         
@@ -423,12 +419,10 @@ class World(object):
             # set walk to random point
             all_actors[i].go_to_location(self.world.get_random_location_from_navigation())
             # max speed
-            all_actors[i].set_max_speed(float(walker_speed[int(i/2)])+0.7)
+            all_actors[i].set_max_speed(float(walker_speed[int(i/2)]))
 
         print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(self.vehicles_id), len(self.walkers_id)))
-
-        # example of how to use parameters
-        traffic_manager.global_percentage_speed_difference(0.0)
+        
 
 
     def next_weather(self, reverse=False):
@@ -1337,6 +1331,9 @@ def game_loop(args):
         client.set_timeout(100.0)
 
         sim_world = client.get_world()
+        sim_world = client.load_world(args.map)
+
+
         if args.sync:
             original_settings = sim_world.get_settings()
             settings = sim_world.get_settings()
@@ -1347,6 +1344,7 @@ def game_loop(args):
 
             traffic_manager = client.get_trafficmanager()
             traffic_manager.set_synchronous_mode(True)
+            traffic_manager.global_percentage_speed_difference(30.0)
 
         if args.autopilot and not sim_world.get_settings().synchronous_mode:
             print("WARNING: You are currently in asynchronous mode and could "
@@ -1453,6 +1451,10 @@ def main():
         '--walkers',
         type=int,
         default=70)
+    argparser.add_argument(
+        '--map',
+        default='Town02'
+    )
 
     args = argparser.parse_args()
 
