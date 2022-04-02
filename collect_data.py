@@ -193,6 +193,7 @@ class World(object):
         self.vehicles_id = []
         self.save_dir = args.save_dir
         self.save_img = args.save_img
+        self.nodisplay = args.nodisplay
         try:
             self.map = self.world.get_map()
         except RuntimeError as error:
@@ -282,7 +283,7 @@ class World(object):
         self.lane_invasion_sensor = LaneInvasionSensor(self.player, self.hud)
         self.gnss_sensor = GnssSensor(self.player)
         self.imu_sensor = IMUSensor(self.player)
-        self.camera_manager = CameraManager(self.player, self.hud, self._gamma)
+        self.camera_manager = CameraManager(self.player, self.hud, self._gamma, self.nodisplay)
         self.camera_manager.transform_index = cam_pos_index
         self.camera_manager.set_sensor(cam_index, notify=False)
         self.camera_manager.save_img = self.save_img
@@ -477,7 +478,7 @@ class World(object):
 
     def render(self, display):
         self.camera_manager.render(display)
-        self.hud.render(display)
+        if not self.nodisplay: self.hud.render(display)
 
     def destroy_sensors(self):
         self.camera_manager.sensor.destroy()
@@ -769,7 +770,7 @@ class KeyboardControl(object):
 
 
 class HUD(object):
-    def __init__(self, width, height):
+    def __init__(self, width, height, nodisplay):
         self.dim = (width, height)
         font = pygame.font.Font(pygame.font.get_default_font(), 20)
         font_name = 'courier' if os.name == 'nt' else 'mono'
@@ -786,6 +787,7 @@ class HUD(object):
         self._show_info = True
         self._info_text = []
         self._server_clock = pygame.time.Clock()
+        self.nodisplay = nodisplay
 
     def on_world_tick(self, timestamp):
         self._server_clock.tick()
@@ -795,7 +797,7 @@ class HUD(object):
 
     def tick(self, world, clock):
         self._notifications.tick(world, clock)
-        if not self._show_info:
+        if self.nodisplay or not self._show_info:
             return
         t = world.player.get_transform()
         v = world.player.get_velocity()
@@ -865,7 +867,7 @@ class HUD(object):
         self._notifications.set_text('Error: %s' % text, (255, 0, 0))
 
     def render(self, display):
-        if self._show_info:
+        if not self.nodisplay and self._show_info:
             info_surface = pygame.Surface((220, self.dim[1]))
             info_surface.set_alpha(100)
             display.blit(info_surface, (0, 0))
@@ -1172,7 +1174,7 @@ class RadarSensor(object):
 
 
 class CameraManager(object):
-    def __init__(self, parent_actor, hud, gamma_correction):
+    def __init__(self, parent_actor, hud, gamma_correction, nodisplay):
         self.sensor = None
         self.surface = None
         self._parent = parent_actor
@@ -1182,6 +1184,7 @@ class CameraManager(object):
         self.save_dir = None
         self.semantic_cam = None
         self.walkers = None
+        self.nodisplay = nodisplay
         bound_x = 0.5 + self._parent.bounding_box.extent.x
         bound_y = 0.5 + self._parent.bounding_box.extent.y
         bound_z = 0.5 + self._parent.bounding_box.extent.z
@@ -1277,7 +1280,7 @@ class CameraManager(object):
         self.hud.notification('Recording %s' % ('On' if self.recording else 'Off'))
 
     def render(self, display):
-        if self.surface is not None:
+        if not self.nodisplay and self.surface is not None:
             display.blit(self.surface, (0, 0))
 
     @staticmethod
@@ -1410,13 +1413,16 @@ def game_loop(args):
             print("WARNING: You are currently in asynchronous mode and could "
                   "experience some issues with the traffic simulation")
 
-        display = pygame.display.set_mode(
-            (args.width, args.height),
-            pygame.HWSURFACE | pygame.DOUBLEBUF)
-        display.fill((0,0,0))
-        pygame.display.flip()
+        if args.nodisplay:
+            display = None
+        else:
+            display = pygame.display.set_mode(
+                (args.width, args.height),
+                pygame.HWSURFACE | pygame.DOUBLEBUF)
+            display.fill((0,0,0))
+            pygame.display.flip()
 
-        hud = HUD(args.width, args.height)
+        hud = HUD(args.width, args.height, args.nodisplay)
         world = World(sim_world, hud, args, client)
         controller = KeyboardControl(world, args.autopilot)
 
@@ -1430,11 +1436,12 @@ def game_loop(args):
             if args.sync:
                 sim_world.tick()
             clock.tick_busy_loop(60)
-            if controller.parse_events(client, world, clock, args.sync):
+            if (not args.nodisplay) and controller.parse_events(client, world, clock, args.sync):
                 return
             world.tick(clock)
             world.render(display)
-            pygame.display.flip()
+            if not args.nodisplay:
+                pygame.display.flip()
 
     finally:
 
@@ -1522,6 +1529,10 @@ def main():
     argparser.add_argument(
         '--save_dir',
         default='/home/adriv/Carla/CARLA_0.9.13/PythonAPI/custom/'
+    )
+    argparser.add_argument(
+        '--nodisplay',
+        action='store_true'
     )
 
 
