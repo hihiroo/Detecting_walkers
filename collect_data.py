@@ -200,8 +200,10 @@ class World(object):
             'green': args.green_time,
             'yellow': args.yellow_time
         }
+        self.nored = args.nored
         self.crossing_walker = args.walker_crossing_rate
         self.running_walker = args.walker_running_rate
+        self.walker_extent = {}
         try:
             self.map = self.world.get_map()
         except RuntimeError as error:
@@ -282,6 +284,9 @@ class World(object):
                 sys.exit(1)
             spawn_points = self.map.get_spawn_points()
             spawn_point = random.choice(spawn_points) if spawn_points else carla.Transform()
+            spawn_point.location.x = 14.0
+            spawn_point.location.y = 306.4
+            spawn_point.rotation.yaw = 0.0
             self.player = self.world.try_spawn_actor(blueprint, spawn_point)
             self.show_vehicle_telemetry = False
             self.modify_vehicle_physics(self.player)
@@ -290,11 +295,9 @@ class World(object):
         self.lane_invasion_sensor = LaneInvasionSensor(self.player, self.hud)
         self.gnss_sensor = GnssSensor(self.player)
         self.imu_sensor = IMUSensor(self.player)
-        self.camera_manager = CameraManager(self.player, self.hud, self._gamma, self.nodisplay)
+        self.camera_manager = CameraManager(self.player, self.hud, self._gamma, self.nodisplay, self.save_img, self.save_dir)
         self.camera_manager.transform_index = cam_pos_index
         self.camera_manager.set_sensor(cam_index, notify=False)
-        self.camera_manager.save_img = self.save_img
-        self.camera_manager.save_dir = self.save_dir
         actor_type = get_actor_display_name(self.player)
         self.hud.notification(actor_type)
         self.player.get_world().set_weather(self._weather_presets[self._weather_index][0])
@@ -334,29 +337,6 @@ class World(object):
         SetAutopilot = carla.command.SetAutopilot
         FutureActor = carla.command.FutureActor
 
-        # --------------
-        # Spawn vehicles
-        # --------------
-        batch = []
-        for n, transform in enumerate(spawn_points):
-            if n >= self.number_of_vehicles:
-                break
-            blueprint = random.choice(blueprints)
-            if blueprint.has_attribute('color'):
-                color = random.choice(blueprint.get_attribute('color').recommended_values)
-                blueprint.set_attribute('color', color)
-            if blueprint.has_attribute('driver_id'):
-                driver_id = random.choice(blueprint.get_attribute('driver_id').recommended_values)
-                blueprint.set_attribute('driver_id', driver_id)
-            blueprint.set_attribute('role_name', 'autopilot')
-            batch.append(SpawnActor(blueprint, transform).then(SetAutopilot(FutureActor, True)))
-
-        for response in self.client.apply_batch_sync(batch, synchronous_master):
-            if response.error:
-                logging.error(response.error)
-            else:
-                self.vehicles_id.append(response.actor_id)
-
         # -------------
         # Spawn Walkers
         # -------------
@@ -366,11 +346,16 @@ class World(object):
         # 1. take all the random locations to spawn
         spawn_points = []
         for i in range(self.walkers_cnt):
-            spawn_point = carla.Transform()
-            loc = self.world.get_random_location_from_navigation()
+            #spawn_point = carla.Transform()
+            #loc = self.world.get_random_location_from_navigation()
+            loc = random.choice(self.world.get_map().get_spawn_points())
+            # loc.location.x = 31.884769439697266 
+            # loc.location.y = 310.0588684082031
+            # loc.rotation.yaw = 0.0
             if (loc != None):
-                spawn_point.location = loc
-                spawn_points.append(spawn_point)
+                #spawn_point.location = loc
+                #spawn_points.append(spawn_point)
+                spawn_points.append(loc)
         # 2. we spawn the walker object
         batch = []
         walker_speed = []
@@ -405,6 +390,7 @@ class World(object):
                 walkers_list.append({"id": results[i].actor_id})
                 walker_speed2.append(walker_speed[i])
         walker_speed = walker_speed2
+
         # 3. we spawn the walker controller
         batch = []
         walker_controller_bp = self.world.get_blueprint_library().find('controller.ai.walker')
@@ -416,16 +402,12 @@ class World(object):
                 logging.error(results[i].error)
             else:
                 walkers_list[i]["con"] = results[i].actor_id
+                
         # 4. we put altogether the walkers and controllers id to get the objects from their id
         for i in range(len(walkers_list)):
             self.walkers_id.append(walkers_list[i]["con"])
             self.walkers_id.append(walkers_list[i]["id"])
         all_actors = self.world.get_actors(self.walkers_id)
-
-        if self.sync:
-            self.world.tick()
-        else:
-            self.world.wait_for_tick()
 
         # 5. initialize each controller and set target to walk to (list is [controler, actor, controller, actor ...])
         # set how many pedestrians can cross the road
@@ -437,9 +419,37 @@ class World(object):
             all_actors[i].go_to_location(self.world.get_random_location_from_navigation())
             # max speed
             all_actors[i].set_max_speed(float(walker_speed[int(i/2)]))
+            #all_actors[i].set_max_speed(0.0)
+            self.walker_extent[all_actors[i+1].id] = all_actors[i+1].bounding_box.extent
+        self.camera_manager.walker_extent = self.walker_extent
 
-        print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(self.vehicles_id), len(self.walkers_id)))
+        # --------------
+        # Spawn vehicles
+        # --------------
+        batch = []
+        spawn_points = self.world.get_map().get_spawn_points()
+        for n, transform in enumerate(spawn_points):
+            if n >= self.number_of_vehicles:
+                break
+            blueprint = random.choice(blueprints)
+            if blueprint.has_attribute('color'):
+                color = random.choice(blueprint.get_attribute('color').recommended_values)
+                blueprint.set_attribute('color', color)
+            if blueprint.has_attribute('driver_id'):
+                driver_id = random.choice(blueprint.get_attribute('driver_id').recommended_values)
+                blueprint.set_attribute('driver_id', driver_id)
+            blueprint.set_attribute('role_name', 'autopilot')
+            batch.append(SpawnActor(blueprint, transform).then(SetAutopilot(FutureActor, True)))
+
+        for response in self.client.apply_batch_sync(batch, synchronous_master):
+            if response.error:
+                logging.error(response.error)
+            else:
+                self.vehicles_id.append(response.actor_id)
+
+        print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(self.vehicles_id), len(self.walkers_id)//2))
         
+
     def next_weather(self, reverse=False):
         self._weather_index += -1 if reverse else 1
         self._weather_index %= len(self._weather_presets)
@@ -480,10 +490,10 @@ class World(object):
 
     def tick(self, clock):
         # 적색 신호에 걸렸을 때 바로 청신호로 바꿔주기
-        # if self.player.is_at_traffic_light():
-        #     traffic_light = self.player.get_traffic_light()
-        #     if traffic_light.get_state() == carla.TrafficLightState.Red:
-        #         traffic_light.set_state(carla.TrafficLightState.Green)
+        if self.nored and self.player.is_at_traffic_light():
+            traffic_light = self.player.get_traffic_light()
+            if traffic_light.get_state() == carla.TrafficLightState.Red:
+                traffic_light.set_state(carla.TrafficLightState.Green)
         self.hud.tick(self, clock)
 
     def render(self, display):
@@ -1184,17 +1194,20 @@ class RadarSensor(object):
 
 
 class CameraManager(object):
-    def __init__(self, parent_actor, hud, gamma_correction, nodisplay):
+    def __init__(self, parent_actor, hud, gamma_correction, nodisplay, save_img, save_dir):
         self.sensor = None
         self.surface = None
         self._parent = parent_actor
         self.hud = hud
         self.recording = False
-        self.save_img = None
-        self.save_dir = None
+        self.save_img = save_img
+        self.save_dir = save_dir
+        self.world = self._parent.get_world()
         self.semantic_cam = None
-        self.walkers = None
         self.nodisplay = nodisplay
+        self.number_of_collected_data = 0
+        self.walker_extent = None
+        self.simulation = []
         bound_x = 0.5 + self._parent.bounding_box.extent.x
         bound_y = 0.5 + self._parent.bounding_box.extent.y
         bound_z = 0.5 + self._parent.bounding_box.extent.z
@@ -1234,13 +1247,13 @@ class CameraManager(object):
                 'chromatic_aberration_offset': '0'}],
             ['sensor.camera.optical_flow', cc.Raw, 'Optical Flow', {}],
         ]
-        world = self._parent.get_world()
-        bp_library = world.get_blueprint_library()
+        bp_library = self.world.get_blueprint_library()
         for item in self.sensors:
             bp = bp_library.find(item[0])
             if item[0].startswith('sensor.camera'):
                 bp.set_attribute('image_size_x', str(hud.dim[0]))
                 bp.set_attribute('image_size_y', str(hud.dim[1]))
+                bp.set_attribute('fov', str(40))
                 if bp.has_attribute('gamma'):
                     bp.set_attribute('gamma', str(gamma_correction))
                 for attr_name, attr_value in item[3].items():
@@ -1268,16 +1281,26 @@ class CameraManager(object):
             if self.sensor is not None:
                 self.sensor.destroy()
                 self.surface = None
-            self.sensor = self._parent.get_world().spawn_actor(
+            self.sensor = self.world.spawn_actor(
                 self.sensors[index][-1],
                 self._camera_transforms[self.transform_index][0],
                 attach_to=self._parent,
                 attachment_type=self._camera_transforms[self.transform_index][1])
+
+            # if self.semantic_cam is None:
+            #     self.semantic_cam = self.world.spawn_actor(
+            #         self.sensors[5][-1],
+            #         self._camera_transforms[1][0],
+            #         attach_to=self._parent,
+            #         attachment_type=self._camera_transforms[1][1])
+            #     cc = carla.ColorConverter.CityScapesPalette
+            #     self.semantic_cam.listen(lambda image: image.save_to_disk(self.save_dir + 'semantic/%08d' % image.frame,cc))
+            #     self.number_of_collected_data = 0
             # We need to pass the lambda a weak reference to self to avoid
             # circular reference.
             weak_self = weakref.ref(self)
-            self.sensor.listen(lambda image: CameraManager._parse_image(weak_self, image))
-        
+            self.sensor.listen(lambda image: CameraManager._parse_image(weak_self, image, self.world.get_snapshot()))
+
         if notify:
             self.hud.notification(self.sensors[index][2])
         self.index = index
@@ -1294,99 +1317,53 @@ class CameraManager(object):
             display.blit(self.surface, (0, 0))
 
     @staticmethod
-    def _parse_image(weak_self, image):
+    def _parse_image(weak_self, image, world_snapshot):
         self = weak_self()
+
         if not self:
             return
-        if self.sensors[self.index][0].startswith('sensor.lidar'):
-            points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
-            points = np.reshape(points, (int(points.shape[0] / 4), 4))
-            lidar_data = np.array(points[:, :2])
-            lidar_data *= min(self.hud.dim) / (2.0 * self.lidar_range)
-            lidar_data += (0.5 * self.hud.dim[0], 0.5 * self.hud.dim[1])
-            lidar_data = np.fabs(lidar_data)  # pylint: disable=E1111
-            lidar_data = lidar_data.astype(np.int32)
-            lidar_data = np.reshape(lidar_data, (-1, 2))
-            lidar_img_size = (self.hud.dim[0], self.hud.dim[1], 3)
-            lidar_img = np.zeros((lidar_img_size), dtype=np.uint8)
-            lidar_img[tuple(lidar_data.T)] = (255, 255, 255)
-            self.surface = pygame.surfarray.make_surface(lidar_img)
-        elif self.sensors[self.index][0].startswith('sensor.camera.dvs'):
-            # Example of converting the raw_data from a carla.DVSEventArray
-            # sensor into a NumPy array and using it as an image
-            dvs_events = np.frombuffer(image.raw_data, dtype=np.dtype([
-                ('x', np.uint16), ('y', np.uint16), ('t', np.int64), ('pol', np.bool)]))
-            dvs_img = np.zeros((image.height, image.width, 3), dtype=np.uint8)
-            # Blue is positive, red is negative
-            dvs_img[dvs_events[:]['y'], dvs_events[:]['x'], dvs_events[:]['pol'] * 2] = 255
-            self.surface = pygame.surfarray.make_surface(dvs_img.swapaxes(0, 1))
-        elif self.sensors[self.index][0].startswith('sensor.camera.optical_flow'):
-            image = image.get_color_coded_flow()
-            array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
-            array = np.reshape(array, (image.height, image.width, 4))
-            array = array[:, :, :3]
-            array = array[:, :, ::-1]
-            self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
-        else:
-            image.convert(self.sensors[self.index][1])
-            array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
-            array = np.reshape(array, (image.height, image.width, 4))
-            array = array[:, :, :3]
-            array = array[:, :, ::-1]
-            self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
-        if self.recording:
-            image.save_to_disk('_out/%08d' % image.frame)
+        
+        if self.save_img and self.walker_extent is not None:
+            self.simulation.append((world_snapshot, image))
 
-        if self.save_img:
-            save_dir = self.save_dir + 'image_recording/'
-            if not os.path.isdir(save_dir):
-                os.makedirs(save_dir)
-            if not os.path.isdir(save_dir + 'info/'):
-                os.makedirs(save_dir + 'info/')
-            if not os.path.isdir(save_dir + 'semantic/'):
-                os.makedirs(save_dir + 'semantic/')
-            
-            if self.semantic_cam is None:
-                self.semantic_cam = self._parent.get_world().spawn_actor(
-                    self.sensors[5][-1],
-                    self._camera_transforms[1][0],
-                    attach_to=self._parent,
-                    attachment_type=self._camera_transforms[1][1])
-                cc = carla.ColorConverter.CityScapesPalette
-                self.semantic_cam.listen(lambda image: image.save_to_disk(save_dir + 'semantic/%08d' % image.frame,cc))
-
-            if self.walkers is None or len(self.walkers) == 0:
-                self.walkers = self._parent.get_world().get_actors().filter('walker.*')
-            
-            with open(save_dir + 'info/%08d' % image.frame + '.txt', 'w') as car_info:
-                car_info.write("Car_velocity_xyz ")
-                car_info.write(str(self._parent.get_velocity().x) + " " + str(self._parent.get_velocity().y) + " " + str(self._parent.get_velocity().z) + '\n')
-                
-                car_info.write("Camera_hw_fov ")
-                cam_h = self.sensor.attributes['image_size_y']
-                cam_w = self.sensor.attributes['image_size_x']
-                cam_fov = self.sensor.attributes['fov']
-                car_info.write(str(cam_h) + " " + str(cam_w) + " " + str(cam_fov) + "\n")
-
-                car_info.write("Camera_location_xyz_yaw_roll_pitch ")
-                cam_loc = self.sensor.get_transform().location
-                cam_rot = self.sensor.get_transform().rotation
-                car_info.write(str(cam_loc.x) + " " + str(cam_loc.y) + " " + str(cam_loc.z) + " " + str(cam_rot.yaw) + " " + str(cam_rot.roll) + " " + str(cam_rot.pitch) + '\n')
-                
-                for walker in self.walkers:
-                    extent_x = walker.bounding_box.extent.x
-                    extent_y = walker.bounding_box.extent.y
-                    extent_z = walker.bounding_box.extent.z
-                    bb_loc = walker.bounding_box.location
-                    loc = walker.get_transform().location
-                    rot = walker.get_transform().rotation
-
-                    car_info.write("Walker_id_bounding_box_extent_xyz_location_xyz_location_xyz_rotation_yaw_roll_pitch ")
-                    car_info.write(str(walker.id) + " " + str(extent_x) + " " + str(extent_y) + " " + str(extent_z) + " " +\
-                        str(bb_loc.x) + " " + str(bb_loc.y) + " " + str(bb_loc.z) + " " + \
-                        str(loc.x) + " " + str(loc.y) + " " + str(loc.z) + " " + \
-                            str(rot.yaw) + " " + str(rot.roll) + " " + str(rot.pitch) + "\n")
-            image.save_to_disk(save_dir + '%08d' % image.frame, carla.ColorConverter.Raw)
+        # if self.sensors[self.index][0].startswith('sensor.lidar'):
+        #     points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
+        #     points = np.reshape(points, (int(points.shape[0] / 4), 4))
+        #     lidar_data = np.array(points[:, :2])
+        #     lidar_data *= min(self.hud.dim) / (2.0 * self.lidar_range)
+        #     lidar_data += (0.5 * self.hud.dim[0], 0.5 * self.hud.dim[1])
+        #     lidar_data = np.fabs(lidar_data)  # pylint: disable=E1111
+        #     lidar_data = lidar_data.astype(np.int32)
+        #     lidar_data = np.reshape(lidar_data, (-1, 2))
+        #     lidar_img_size = (self.hud.dim[0], self.hud.dim[1], 3)
+        #     lidar_img = np.zeros((lidar_img_size), dtype=np.uint8)
+        #     lidar_img[tuple(lidar_data.T)] = (255, 255, 255)
+        #     self.surface = pygame.surfarray.make_surface(lidar_img)
+        # elif self.sensors[self.index][0].startswith('sensor.camera.dvs'):
+        #     # Example of converting the raw_data from a carla.DVSEventArray
+        #     # sensor into a NumPy array and using it as an image
+        #     dvs_events = np.frombuffer(image.raw_data, dtype=np.dtype([
+        #         ('x', np.uint16), ('y', np.uint16), ('t', np.int64), ('pol', np.bool)]))
+        #     dvs_img = np.zeros((image.height, image.width, 3), dtype=np.uint8)
+        #     # Blue is positive, red is negative
+        #     dvs_img[dvs_events[:]['y'], dvs_events[:]['x'], dvs_events[:]['pol'] * 2] = 255
+        #     self.surface = pygame.surfarray.make_surface(dvs_img.swapaxes(0, 1))
+        # elif self.sensors[self.index][0].startswith('sensor.camera.optical_flow'):
+        #     image = image.get_color_coded_flow()
+        #     array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+        #     array = np.reshape(array, (image.height, image.width, 4))
+        #     array = array[:, :, :3]
+        #     array = array[:, :, ::-1]
+        #     self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
+        # else:
+        #     image.convert(self.sensors[self.index][1])
+        #     array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+        #     array = np.reshape(array, (image.height, image.width, 4))
+        #     array = array[:, :, :3]
+        #     array = array[:, :, ::-1]
+        #     self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
+        # if self.recording:
+        #     image.save_to_disk('_out/%08d' % image.frame)
 
 # ==============================================================================
 # -- game_loop() ---------------------------------------------------------------
@@ -1398,6 +1375,15 @@ def game_loop(args):
     pygame.font.init()
     world = None
     original_settings = None
+
+    if args.save_img:
+        save_dir = args.save_dir + 'image_recording/'
+        if not os.path.isdir(save_dir):
+            os.makedirs(save_dir)
+        if not os.path.isdir(save_dir + 'info/'):
+            os.makedirs(save_dir + 'info/')
+        if not os.path.isdir(save_dir + 'semantic/'):
+            os.makedirs(save_dir + 'semantic/')
 
     try:
         client = carla.Client(args.host, args.port)
@@ -1452,6 +1438,43 @@ def game_loop(args):
             world.render(display)
             if not args.nodisplay:
                 pygame.display.flip()
+            
+            if args.save_img:
+                cam_h = world.camera_manager.sensor.attributes['image_size_y']
+                cam_w = world.camera_manager.sensor.attributes['image_size_x']
+                cam_fov = world.camera_manager.sensor.attributes['fov']
+
+                for snapshot, img in world.camera_manager.simulation:
+                    player = snapshot.find(world.camera_manager._parent.id)
+                    cam = snapshot.find(world.camera_manager.sensor.id)
+                    walkers = [(snapshot.find(world.walkers_id[i]), world.walker_extent[world.walkers_id[i]]) for i in range(1, len(world.walkers_id), 2)]
+
+                    with open(save_dir + 'info/%08d' % img.frame + '.txt', 'w') as car_info:
+                        car_info.write("Car_velocity_xyz ")
+                        car_info.write(str(player.get_velocity().x) + " " + str(player.get_velocity().y) + " " + str(player.get_velocity().z) + '\n')
+                        car_info.write("Camera_hw_fov ")
+                        car_info.write(str(cam_h) + " " + str(cam_w) + " " + str(cam_fov) + "\n")
+
+                        car_info.write("Camera_location_xyz_yaw_roll_pitch ")
+                        cam_loc = cam.get_transform().location
+                        cam_rot = cam.get_transform().rotation
+                        car_info.write(str(cam_loc.x) + " " + str(cam_loc.y) + " " + str(cam_loc.z) + " " + str(cam_rot.yaw) + " " + str(cam_rot.roll) + " " + str(cam_rot.pitch) + '\n')
+                        
+                        for walker, extent in walkers:
+                            loc = walker.get_transform().location
+                            rot = walker.get_transform().rotation
+
+                            car_info.write("Walker_id_bounding_box_extent_xyz_location_xyz_location_xyz_rotation_yaw_roll_pitch ")
+                            car_info.write(str(walker.id) + " " + str(extent.x) + " " + str(extent.y) + " " + str(extent.z) + " " +\
+                                str("0.0") + " " + str("0.0") + " " + str("0.0") + " " + \
+                                str(loc.x) + " " + str(loc.y) + " " + str(loc.z) + " " + \
+                                    str(rot.yaw) + " " + str(rot.roll) + " " + str(rot.pitch) + "\n")
+                    img.save_to_disk(save_dir + '%08d' % img.frame, carla.ColorConverter.Raw)
+
+                    world.camera_manager.number_of_collected_data += 1
+                    if world.camera_manager.number_of_collected_data >= args.number_of_data:
+                        break
+                world.camera_manager.simulation = []
 
     finally:
 
@@ -1587,6 +1610,15 @@ def main():
             CloudySunset, Default, HardRainNight, HardRainNoon, HardRainSunset, \
             MidRainSunset, MidRainyNight, MidRainyNoon, 'SoftRainNight', 'SoftRainNoon', \
             'SoftRainSunset', 'WetCloudyNight', 'WetCloudyNoon', 'WetCloudySunset', 'WetNight', 'WetNoon', 'WetSunset']"
+    )
+    argparser.add_argument(
+        '-cnt', '--number_of_data',
+        type=int,
+        default=20000
+    )
+    argparser.add_argument(
+        '--nored',
+        action='store_true'
     )
 
     args = argparser.parse_args()
