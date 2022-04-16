@@ -506,7 +506,8 @@ class World(object):
             self.lane_invasion_sensor.sensor,
             self.gnss_sensor.sensor,
             self.imu_sensor.sensor,
-            self.camera_manager.semantic_cam]
+            self.camera_manager.semantic_cam,
+            self.camera_manager.instance_cam]
         for sensor in sensors:
             if sensor is not None:
                 sensor.stop()
@@ -1195,6 +1196,7 @@ class CameraManager(object):
         self.save_dir = save_dir
         self.world = self._parent.get_world()
         self.semantic_cam = None
+        self.instance_cam = None
         self.nodisplay = nodisplay
         self.number_of_collected_data = 0
         self.walker_extent = None
@@ -1287,6 +1289,16 @@ class CameraManager(object):
                 cc = carla.ColorConverter.CityScapesPalette
                 self.semantic_cam.listen(lambda image: image.save_to_disk(self.save_dir + 'image_recording/semantic/%08d' % image.frame, cc))
                 self.number_of_collected_data = 0
+
+            if self.instance_cam is None:
+                self.instance_cam = self.world.spawn_actor(
+                    self.sensors[7][-1],
+                    self._camera_transforms[1][0],
+                    attach_to=self._parent,
+                    attachment_type=self._camera_transforms[1][1])
+                cc2 = carla.ColorConverter.Raw
+                self.instance_cam.listen(lambda image: image.save_to_disk(self.save_dir + 'image_recording/instance/%08d' % image.frame, cc2))
+                self.number_of_collected_data = 0
             # We need to pass the lambda a weak reference to self to avoid
             # circular reference.
             weak_self = weakref.ref(self)
@@ -1375,6 +1387,8 @@ def game_loop(args):
             os.makedirs(save_dir + 'info/')
         if not os.path.isdir(save_dir + 'semantic/'):
             os.makedirs(save_dir + 'semantic/')
+        if not os.path.isdir(save_dir + 'instance/'):
+            os.makedirs(save_dir + 'instance/')
 
     try:
         client = carla.Client(args.host, args.port)
