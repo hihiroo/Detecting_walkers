@@ -284,9 +284,6 @@ class World(object):
                 sys.exit(1)
             spawn_points = self.map.get_spawn_points()
             spawn_point = random.choice(spawn_points) if spawn_points else carla.Transform()
-            spawn_point.location.x = 14.0
-            spawn_point.location.y = 306.4
-            spawn_point.rotation.yaw = 0.0
             self.player = self.world.try_spawn_actor(blueprint, spawn_point)
             self.show_vehicle_telemetry = False
             self.modify_vehicle_physics(self.player)
@@ -346,16 +343,11 @@ class World(object):
         # 1. take all the random locations to spawn
         spawn_points = []
         for i in range(self.walkers_cnt):
-            #spawn_point = carla.Transform()
-            #loc = self.world.get_random_location_from_navigation()
-            loc = random.choice(self.world.get_map().get_spawn_points())
-            # loc.location.x = 31.884769439697266 
-            # loc.location.y = 310.0588684082031
-            # loc.rotation.yaw = 0.0
+            spawn_point = carla.Transform()
+            loc = self.world.get_random_location_from_navigation()
             if (loc != None):
-                #spawn_point.location = loc
-                #spawn_points.append(spawn_point)
-                spawn_points.append(loc)
+                spawn_point.location = loc
+                spawn_points.append(spawn_point)
         # 2. we spawn the walker object
         batch = []
         walker_speed = []
