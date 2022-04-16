@@ -809,8 +809,7 @@ class HUD(object):
 
     def tick(self, world, clock):
         self._notifications.tick(world, clock)
-        if self.nodisplay or not self._show_info:
-            return
+        if self.nodisplay or not self._show_info: return
         t = world.player.get_transform()
         v = world.player.get_velocity()
         c = world.player.get_control()
@@ -879,7 +878,7 @@ class HUD(object):
         self._notifications.set_text('Error: %s' % text, (255, 0, 0))
 
     def render(self, display):
-        if not self.nodisplay and self._show_info:
+        if (not self.nodisplay) and self._show_info:
             info_surface = pygame.Surface((220, self.dim[1]))
             info_surface.set_alpha(100)
             display.blit(info_surface, (0, 0))
@@ -1279,15 +1278,15 @@ class CameraManager(object):
                 attach_to=self._parent,
                 attachment_type=self._camera_transforms[self.transform_index][1])
 
-            # if self.semantic_cam is None:
-            #     self.semantic_cam = self.world.spawn_actor(
-            #         self.sensors[5][-1],
-            #         self._camera_transforms[1][0],
-            #         attach_to=self._parent,
-            #         attachment_type=self._camera_transforms[1][1])
-            #     cc = carla.ColorConverter.CityScapesPalette
-            #     self.semantic_cam.listen(lambda image: image.save_to_disk(self.save_dir + 'semantic/%08d' % image.frame,cc))
-            #     self.number_of_collected_data = 0
+            if self.semantic_cam is None:
+                self.semantic_cam = self.world.spawn_actor(
+                    self.sensors[5][-1],
+                    self._camera_transforms[1][0],
+                    attach_to=self._parent,
+                    attachment_type=self._camera_transforms[1][1])
+                cc = carla.ColorConverter.CityScapesPalette
+                self.semantic_cam.listen(lambda image: image.save_to_disk(self.save_dir + 'image_recording/semantic/%08d' % image.frame, cc))
+                self.number_of_collected_data = 0
             # We need to pass the lambda a weak reference to self to avoid
             # circular reference.
             weak_self = weakref.ref(self)
@@ -1318,44 +1317,44 @@ class CameraManager(object):
         if self.save_img and self.walker_extent is not None:
             self.simulation.append((world_snapshot, image))
 
-        # if self.sensors[self.index][0].startswith('sensor.lidar'):
-        #     points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
-        #     points = np.reshape(points, (int(points.shape[0] / 4), 4))
-        #     lidar_data = np.array(points[:, :2])
-        #     lidar_data *= min(self.hud.dim) / (2.0 * self.lidar_range)
-        #     lidar_data += (0.5 * self.hud.dim[0], 0.5 * self.hud.dim[1])
-        #     lidar_data = np.fabs(lidar_data)  # pylint: disable=E1111
-        #     lidar_data = lidar_data.astype(np.int32)
-        #     lidar_data = np.reshape(lidar_data, (-1, 2))
-        #     lidar_img_size = (self.hud.dim[0], self.hud.dim[1], 3)
-        #     lidar_img = np.zeros((lidar_img_size), dtype=np.uint8)
-        #     lidar_img[tuple(lidar_data.T)] = (255, 255, 255)
-        #     self.surface = pygame.surfarray.make_surface(lidar_img)
-        # elif self.sensors[self.index][0].startswith('sensor.camera.dvs'):
-        #     # Example of converting the raw_data from a carla.DVSEventArray
-        #     # sensor into a NumPy array and using it as an image
-        #     dvs_events = np.frombuffer(image.raw_data, dtype=np.dtype([
-        #         ('x', np.uint16), ('y', np.uint16), ('t', np.int64), ('pol', np.bool)]))
-        #     dvs_img = np.zeros((image.height, image.width, 3), dtype=np.uint8)
-        #     # Blue is positive, red is negative
-        #     dvs_img[dvs_events[:]['y'], dvs_events[:]['x'], dvs_events[:]['pol'] * 2] = 255
-        #     self.surface = pygame.surfarray.make_surface(dvs_img.swapaxes(0, 1))
-        # elif self.sensors[self.index][0].startswith('sensor.camera.optical_flow'):
-        #     image = image.get_color_coded_flow()
-        #     array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
-        #     array = np.reshape(array, (image.height, image.width, 4))
-        #     array = array[:, :, :3]
-        #     array = array[:, :, ::-1]
-        #     self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
-        # else:
-        #     image.convert(self.sensors[self.index][1])
-        #     array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
-        #     array = np.reshape(array, (image.height, image.width, 4))
-        #     array = array[:, :, :3]
-        #     array = array[:, :, ::-1]
-        #     self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
-        # if self.recording:
-        #     image.save_to_disk('_out/%08d' % image.frame)
+        if self.sensors[self.index][0].startswith('sensor.lidar'):
+            points = np.frombuffer(image.raw_data, dtype=np.dtype('f4'))
+            points = np.reshape(points, (int(points.shape[0] / 4), 4))
+            lidar_data = np.array(points[:, :2])
+            lidar_data *= min(self.hud.dim) / (2.0 * self.lidar_range)
+            lidar_data += (0.5 * self.hud.dim[0], 0.5 * self.hud.dim[1])
+            lidar_data = np.fabs(lidar_data)  # pylint: disable=E1111
+            lidar_data = lidar_data.astype(np.int32)
+            lidar_data = np.reshape(lidar_data, (-1, 2))
+            lidar_img_size = (self.hud.dim[0], self.hud.dim[1], 3)
+            lidar_img = np.zeros((lidar_img_size), dtype=np.uint8)
+            lidar_img[tuple(lidar_data.T)] = (255, 255, 255)
+            self.surface = pygame.surfarray.make_surface(lidar_img)
+        elif self.sensors[self.index][0].startswith('sensor.camera.dvs'):
+            # Example of converting the raw_data from a carla.DVSEventArray
+            # sensor into a NumPy array and using it as an image
+            dvs_events = np.frombuffer(image.raw_data, dtype=np.dtype([
+                ('x', np.uint16), ('y', np.uint16), ('t', np.int64), ('pol', np.bool)]))
+            dvs_img = np.zeros((image.height, image.width, 3), dtype=np.uint8)
+            # Blue is positive, red is negative
+            dvs_img[dvs_events[:]['y'], dvs_events[:]['x'], dvs_events[:]['pol'] * 2] = 255
+            self.surface = pygame.surfarray.make_surface(dvs_img.swapaxes(0, 1))
+        elif self.sensors[self.index][0].startswith('sensor.camera.optical_flow'):
+            image = image.get_color_coded_flow()
+            array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+            array = np.reshape(array, (image.height, image.width, 4))
+            array = array[:, :, :3]
+            array = array[:, :, ::-1]
+            self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
+        else:
+            image.convert(self.sensors[self.index][1])
+            array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+            array = np.reshape(array, (image.height, image.width, 4))
+            array = array[:, :, :3]
+            array = array[:, :, ::-1]
+            self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
+        if self.recording:
+            image.save_to_disk('_out/%08d' % image.frame)
 
 # ==============================================================================
 # -- game_loop() ---------------------------------------------------------------
